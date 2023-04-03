@@ -1,4 +1,4 @@
-package main
+package vmproxy
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 //go:embed noVNC
 var f embed.FS
 
-func vncProxy(s *tsnet.Server, tlsLn net.Listener) {
+func VNCProxy(s *tsnet.Server, tlsLn net.Listener, vncAddrPort string) {
 	p := vncproxy.New(&vncproxy.Config{
 		TokenHandler: func(r *http.Request) (addr string, err error) {
 			return vncAddrPort, nil

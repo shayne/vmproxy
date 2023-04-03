@@ -10,11 +10,8 @@ import (
 	"tailscale.com/tsnet"
 	"tailscale.com/types/logger"
 	"tailscale.com/util/must"
-)
 
-var (
-	vmName      string
-	vncAddrPort string
+	"github.com/shayne/vmproxy"
 )
 
 func main() {
@@ -22,8 +19,8 @@ func main() {
 		log.Fatal("usage: vmproxy <vm name> <vnc addrport>")
 	}
 
-	vmName = os.Args[1]
-	vncAddrPort = os.Args[2]
+	vmName := os.Args[1]
+	vncAddrPort := os.Args[2]
 
 	must.Get(netip.ParseAddrPort(vncAddrPort))
 
@@ -36,13 +33,13 @@ func main() {
 	var ln net.Listener
 
 	ln = must.Get(s.Listen("tcp", ":22"))
-	go sshServer(ln)
+	go vmproxy.SSHServer(ln, vmName)
 
 	ln = must.Get(s.Listen("tcp", ":80"))
 	go promoteHTTPS(ln)
 
 	ln = must.Get(s.ListenTLS("tcp", ":443"))
-	vncProxy(s, ln)
+	vmproxy.VNCProxy(s, ln, vncAddrPort)
 }
 
 func promoteHTTPS(ln net.Listener) {
