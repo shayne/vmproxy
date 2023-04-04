@@ -1,4 +1,4 @@
-package main
+package vmproxy
 
 import (
 	"fmt"
@@ -21,6 +21,8 @@ import (
 	lm "github.com/charmbracelet/wish/logging"
 )
 
+var vmName string
+
 const listHeight = 14
 
 var (
@@ -41,7 +43,9 @@ var (
 				Render
 )
 
-func sshServer(ln net.Listener) {
+func SSHServer(ln net.Listener, vm string) {
+	// TODO(shayne): Don't use a package global.
+	vmName = vm
 	s := must.Get(wish.NewServer(
 		wish.WithAddress(fmt.Sprintf("%s:%d", ln.Addr().String(), 22)),
 		wish.WithHostKeyPath(".ssh/term_info_ed25519"),
