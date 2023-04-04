@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,8 +22,6 @@ import (
 
 	lm "github.com/charmbracelet/wish/logging"
 )
-
-var vmName string
 
 const listHeight = 14
 
@@ -43,56 +43,76 @@ var (
 				Render
 )
 
-func SSHServer(ln net.Listener, vm string) {
-	// TODO(shayne): Don't use a package global.
-	vmName = vm
-	s := must.Get(wish.NewServer(
+type SSHConfig struct {
+	Domain     string // vm name
+	SSHDir     string // ssh directory
+	LibvirtLoc string // libvirt socket path or <ip addr>:<port>
+}
+
+type SSHServer struct {
+	config *SSHConfig
+}
+
+func NewSSHServer(config *SSHConfig) *SSHServer {
+	return &SSHServer{config: config}
+}
+
+func (s *SSHServer) Serve(ln net.Listener) error {
+	keypath := filepath.Join(s.config.SSHDir, "term_info_ed25519")
+	ws := must.Get(wish.NewServer(
 		wish.WithAddress(fmt.Sprintf("%s:%d", ln.Addr().String(), 22)),
-		wish.WithHostKeyPath(".ssh/term_info_ed25519"),
+		wish.WithHostKeyPath(keypath),
 		wish.WithMiddleware(
-			bm.Middleware(teaHandler),
+			bm.Middleware(s.wishMiddleware()),
 			lm.Middleware(),
 		),
 	))
 
 	log.Print("Starting SSH server on port 22")
-	must.Do(s.Serve(ln))
+	return ws.Serve(ln)
 }
 
-func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
-	items := []list.Item{
-		item("Start"),
-		item("Stop"),
-		item("Pause"),
-		item("Resume"),
-		item("Restart"),
-		item("Force Stop"),
+func (s *SSHServer) wishMiddleware() bm.Handler {
+	return func(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
+		items := []list.Item{
+			item("Start"),
+			item("Stop"),
+			item("Pause"),
+			item("Resume"),
+			item("Restart"),
+			item("Force Stop"),
+		}
+
+		const defaultWidth = 20
+
+		l := list.New(items, itemDelegate{}, defaultWidth, listHeight)
+		l.Title = "VM Controls"
+		l.SetShowStatusBar(false)
+		l.SetFilteringEnabled(false)
+		l.Styles.Title = titleStyle
+		l.Styles.PaginationStyle = paginationStyle
+		l.Styles.HelpStyle = helpStyle
+
+		timeout := 2 * time.Second
+
+		var c net.Conn
+		if _, err := netip.ParseAddrPort(s.config.LibvirtLoc); err == nil {
+			c = must.Get(net.DialTimeout("tcp", s.config.LibvirtLoc, timeout))
+		} else {
+			c = must.Get(net.DialTimeout("unix", s.config.LibvirtLoc, timeout))
+		}
+
+		m := model{
+			list:  l,
+			timer: timer.NewWithInterval(timeout, time.Second),
+		}
+		m.l = libvirt.New(c)
+		must.Do(m.l.Connect())
+
+		m.domain = must.Get(m.l.DomainLookupByName(s.config.Domain))
+
+		return m, []tea.ProgramOption{tea.WithAltScreen()}
 	}
-
-	const defaultWidth = 20
-
-	l := list.New(items, itemDelegate{}, defaultWidth, listHeight)
-	l.Title = "VM Controls"
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.Styles.Title = titleStyle
-	l.Styles.PaginationStyle = paginationStyle
-	l.Styles.HelpStyle = helpStyle
-
-	c := must.Get(net.DialTimeout("tcp", "localhost:16509", 2*time.Second))
-
-	timeout := 2 * time.Second
-
-	m := model{
-		list:  l,
-		timer: timer.NewWithInterval(timeout, time.Second),
-	}
-	m.l = libvirt.New(c)
-	must.Do(m.l.Connect())
-
-	m.domain = must.Get(m.l.DomainLookupByName(vmName))
-
-	return m, []tea.ProgramOption{tea.WithAltScreen()}
 }
 
 type item string
